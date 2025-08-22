@@ -47,6 +47,94 @@ export const Game: React.FC = () => {
 
   const gameLoopRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
+  
+  // Sound effects and background music
+  const playJumpSound = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.log('Sound not supported');
+    }
+  }, []);
+
+  // Background music using Web Audio API
+  const playBackgroundMusic = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      // Create a simple 8-bit style background music
+      const createNote = (frequency: number, duration: number, startTime: number) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime + startTime);
+        gainNode.gain.setValueAtTime(0.02, audioContext.currentTime + startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + startTime + duration);
+        
+        oscillator.start(audioContext.currentTime + startTime);
+        oscillator.stop(audioContext.currentTime + startTime + duration);
+      };
+
+      // Play a longer, more engaging melody
+      const melody = [
+        // First phrase
+        { freq: 523, duration: 0.4, start: 0 },    // C5
+        { freq: 659, duration: 0.4, start: 0.4 },  // E5
+        { freq: 784, duration: 0.4, start: 0.8 },  // G5
+        { freq: 880, duration: 0.8, start: 1.2 },  // A5
+        
+        // Second phrase
+        { freq: 784, duration: 0.4, start: 2.0 },  // G5
+        { freq: 659, duration: 0.4, start: 2.4 },  // E5
+        { freq: 523, duration: 0.4, start: 2.8 },  // C5
+        { freq: 440, duration: 0.8, start: 3.2 },  // A4
+        
+        // Third phrase
+        { freq: 523, duration: 0.4, start: 4.0 },  // C5
+        { freq: 659, duration: 0.4, start: 4.4 },  // E5
+        { freq: 784, duration: 0.4, start: 4.8 },  // G5
+        { freq: 659, duration: 0.8, start: 5.2 },  // E5
+        
+        // Fourth phrase
+        { freq: 523, duration: 0.4, start: 6.0 },  // C5
+        { freq: 440, duration: 0.4, start: 6.4 },  // A4
+        { freq: 523, duration: 0.8, start: 6.8 },  // C5
+      ];
+
+      melody.forEach(note => {
+        createNote(note.freq, note.duration, note.start);
+      });
+
+      // Loop the melody every 7.6 seconds for continuous music
+      setTimeout(() => {
+        if (gameState.isPlaying) {
+          playBackgroundMusic();
+        }
+      }, 7600);
+
+    } catch (error) {
+      console.log('Background music not supported');
+    }
+  }, [gameState.isPlaying]);
+
+
 
   const startGame = useCallback(() => {
     setGameState(prev => ({
@@ -70,12 +158,13 @@ export const Game: React.FC = () => {
 
   const jump = useCallback(() => {
     if (gameState.isPlaying && !gameState.isGameOver) {
+      playJumpSound();
       setGameState(prev => ({
         ...prev,
         birdVelocity: JUMP_FORCE,
       }));
     }
-  }, [gameState.isPlaying, gameState.isGameOver]);
+  }, [gameState.isPlaying, gameState.isGameOver, playJumpSound]);
 
   const gameOver = useCallback(() => {
     setGameState(prev => ({
@@ -84,6 +173,9 @@ export const Game: React.FC = () => {
       isGameOver: true,
       highScore: Math.max(prev.highScore, prev.score),
     }));
+    
+    // Stop background music when game over
+    // Music will automatically stop when isPlaying becomes false
   }, []);
 
   const resetGame = useCallback(() => {
@@ -148,12 +240,12 @@ export const Game: React.FC = () => {
         });
       }
 
-      // Check collisions - working collision detection
+      // Check collisions - balanced collision detection
       const birdRect = {
-        x: 100,
-        y: newBirdY,
-        width: BIRD_SIZE,
-        height: BIRD_SIZE,
+        x: 100 + 8,
+        y: newBirdY + 8,
+        width: BIRD_SIZE - 16,
+        height: BIRD_SIZE - 16,
       };
 
       const collision = newPipes.some(pipe => {
@@ -162,15 +254,15 @@ export const Game: React.FC = () => {
         
         // Top pipe collision
         if (birdRect.x < pipe.x + PIPE_WIDTH && 
-            birdRect.x + BIRD_SIZE > pipe.x &&
+            birdRect.x + birdRect.width > pipe.x &&
             birdRect.y < pipe.topHeight) {
           return true;
         }
         
         // Bottom pipe collision
         if (birdRect.x < pipe.x + PIPE_WIDTH && 
-            birdRect.x + BIRD_SIZE > pipe.x &&
-            birdRect.y + BIRD_SIZE > pipe.bottomY) {
+            birdRect.x + birdRect.width > pipe.x &&
+            birdRect.y + birdRect.height > pipe.bottomY) {
           return true;
         }
         
@@ -221,6 +313,9 @@ export const Game: React.FC = () => {
         isCountdown: false,
         isPlaying: true,
       }));
+      
+      // Start background music when game starts
+      playBackgroundMusic();
     }
   }, [gameState.isCountdown, gameState.countdown]);
 
@@ -275,7 +370,7 @@ export const Game: React.FC = () => {
       {/* Game elements - show pipes during countdown and gameplay */}
       {(gameState.isPlaying || gameState.isCountdown) && (
         <>
-          <Bird y={gameState.birdY} />
+          <Bird y={gameState.birdY} velocity={gameState.birdVelocity} />
           {gameState.pipes.map((pipe, index) => (
             <Pipe key={index} {...pipe} />
           ))}
