@@ -19,6 +19,7 @@ interface GameState {
   birdVelocity: number;
   pipes: Array<{ x: number; topHeight: number; bottomY: number }>;
   gameSpeed: number;
+  coins: Array<{ x: number; y: number; collected: boolean }>;
 }
 
 const GRAVITY = 0.06;
@@ -43,100 +44,443 @@ export const Game: React.FC = () => {
     birdVelocity: 0,
     pipes: [],
     gameSpeed: 1,
+    coins: [],
   });
+
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(0.7);
 
   const gameLoopRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const backgroundMusicRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Sound effects and background music
+  // Enhanced jump sound effect
   const playJumpSound = useCallback(() => {
+    if (isMuted) return;
+    
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
+      const filterNode = audioContext.createBiquadFilter();
       
-      oscillator.connect(gainNode);
+      oscillator.connect(filterNode);
+      filterNode.connect(gainNode);
       gainNode.connect(audioContext.destination);
       
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.1);
+      // Create a more pleasant jump sound
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(300, audioContext.currentTime + 0.15);
       
-      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      // Add filter for softer sound
+      filterNode.type = 'lowpass';
+      filterNode.frequency.setValueAtTime(800, audioContext.currentTime);
+      filterNode.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.15);
+      
+      // Smooth volume envelope
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.15 * volume, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.15);
       
       oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.1);
+      oscillator.stop(audioContext.currentTime + 0.15);
     } catch (error) {
       console.log('Sound not supported');
     }
-  }, []);
+  }, [isMuted, volume]);
 
-  // Background music using Web Audio API
+  // Enhanced background music with better composition
   const playBackgroundMusic = useCallback(() => {
+    if (isMuted) return;
+    
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
       
-      // Create a simple 8-bit style background music
-      const createNote = (frequency: number, duration: number, startTime: number) => {
+      const audioContext = audioContextRef.current;
+      
+      // Create a more sophisticated ambient melody
+      const createNote = (frequency: number, duration: number, startTime: number, volume: number = 0.03) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        const filterNode = audioContext.createBiquadFilter();
+        
+        oscillator.connect(filterNode);
+        filterNode.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Use triangle wave for softer, more ambient sound
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime + startTime);
+        
+        // Add subtle filter movement
+        filterNode.type = 'lowpass';
+        filterNode.frequency.setValueAtTime(frequency * 1.5, audioContext.currentTime + startTime);
+        filterNode.frequency.exponentialRampToValueAtTime(frequency * 0.8, audioContext.currentTime + startTime + duration);
+        
+        // Smooth volume envelope
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime + startTime);
+        gainNode.gain.linearRampToValueAtTime(volume * 0.03, audioContext.currentTime + startTime + 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(volume * 0.003, audioContext.currentTime + startTime + duration);
+        
+        oscillator.start(audioContext.currentTime + startTime);
+        oscillator.stop(audioContext.currentTime + startTime + duration);
+      };
+
+      // Create a more engaging, game-appropriate melody
+      const melody = [
+        // Main theme - uplifting progression
+        { freq: 261, duration: 0.8, start: 0, vol: 0.03 },       // C4
+        { freq: 329, duration: 0.8, start: 0.8, vol: 0.03 },     // E4
+        { freq: 392, duration: 0.8, start: 1.6, vol: 0.03 },     // G4
+        { freq: 523, duration: 1.2, start: 2.4, vol: 0.03 },     // C5
+        
+        // Second phrase
+        { freq: 392, duration: 0.8, start: 3.6, vol: 0.03 },     // G4
+        { freq: 329, duration: 0.8, start: 4.4, vol: 0.03 },     // E4
+        { freq: 261, duration: 0.8, start: 5.2, vol: 0.03 },     // C4
+        { freq: 196, duration: 1.2, start: 6.0, vol: 0.03 },     // G3
+        
+        // Third phrase - variation
+        { freq: 261, duration: 0.8, start: 7.2, vol: 0.03 },     // C4
+        { freq: 349, duration: 0.8, start: 8.0, vol: 0.03 },     // F4
+        { freq: 440, duration: 0.8, start: 8.8, vol: 0.03 },     // A4
+        { freq: 523, duration: 1.2, start: 9.6, vol: 0.03 },     // C5
+        
+        // Fourth phrase - resolution
+        { freq: 440, duration: 0.8, start: 10.8, vol: 0.03 },    // A4
+        { freq: 349, duration: 0.8, start: 11.6, vol: 0.03 },    // F4
+        { freq: 261, duration: 1.6, start: 12.4, vol: 0.03 },    // C4
+        
+        // Harmonic layer - subtle background
+        { freq: 523, duration: 3.2, start: 0, vol: 0.015 },      // C5 (harmony)
+        { freq: 392, duration: 3.2, start: 3.2, vol: 0.015 },    // G4 (harmony)
+        { freq: 329, duration: 3.2, start: 6.4, vol: 0.015 },    // E4 (harmony)
+        { freq: 261, duration: 3.2, start: 9.6, vol: 0.015 },    // C4 (harmony)
+        { freq: 196, duration: 3.2, start: 12.8, vol: 0.015 },   // G3 (harmony)
+      ];
+
+      melody.forEach(note => {
+        createNote(note.freq, note.duration, note.start, note.vol);
+      });
+
+      // Loop the melody every 14 seconds for continuous background music
+      if (gameState.isPlaying && !gameState.isGameOver) {
+        backgroundMusicRef.current = setTimeout(() => {
+          // Double check if game is still playing before continuing
+          if (gameState.isPlaying && !gameState.isGameOver) {
+            playBackgroundMusic();
+          }
+        }, 14000);
+      } else {
+        // Stop music if game is not playing or game over
+        if (backgroundMusicRef.current) {
+          clearTimeout(backgroundMusicRef.current);
+          backgroundMusicRef.current = null;
+        }
+      }
+
+    } catch (error) {
+      console.log('Background music not supported');
+    }
+  }, [gameState.isPlaying, gameState.isGameOver, isMuted, volume]);
+
+  // Continuous background music player
+  const startContinuousMusic = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      
+      // Create a continuous ambient loop
+      const createContinuousNote = (frequency: number, duration: number, startTime: number) => {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
         
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
         
+        // Use sine wave for smoother continuous sound
+        oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime + startTime);
-        gainNode.gain.setValueAtTime(0.02, audioContext.currentTime + startTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + startTime + duration);
+        
+        // Very subtle volume for continuous background
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime + startTime);
+        gainNode.gain.linearRampToValueAtTime(0.008 * volume, audioContext.currentTime + startTime + 2);
+        gainNode.gain.setValueAtTime(0.008 * volume, audioContext.currentTime + startTime + 2);
+        gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + startTime + duration - 2);
         
         oscillator.start(audioContext.currentTime + startTime);
         oscillator.stop(audioContext.currentTime + startTime + duration);
       };
 
-      // Play a longer, more engaging melody
-      const melody = [
-        // First phrase
-        { freq: 523, duration: 0.4, start: 0 },    // C5
-        { freq: 659, duration: 0.4, start: 0.4 },  // E5
-        { freq: 784, duration: 0.4, start: 0.8 },  // G5
-        { freq: 880, duration: 0.8, start: 1.2 },  // A5
-        
-        // Second phrase
-        { freq: 784, duration: 0.4, start: 2.0 },  // G5
-        { freq: 659, duration: 0.4, start: 2.4 },  // E5
-        { freq: 523, duration: 0.4, start: 2.8 },  // C5
-        { freq: 440, duration: 0.8, start: 3.2 },  // A4
-        
-        // Third phrase
-        { freq: 523, duration: 0.4, start: 4.0 },  // C5
-        { freq: 659, duration: 0.4, start: 4.4 },  // E5
-        { freq: 784, duration: 0.4, start: 4.8 },  // G5
-        { freq: 659, duration: 0.8, start: 5.2 },  // E5
-        
-        // Fourth phrase
-        { freq: 523, duration: 0.4, start: 6.0 },  // C5
-        { freq: 440, duration: 0.4, start: 6.4 },  // A4
-        { freq: 523, duration: 0.8, start: 6.8 },  // C5
+      // Create a longer, more varied continuous melody
+      const continuousMelody = [
+        // Extended theme with more variety
+        { freq: 261, duration: 4, start: 0 },      // C4
+        { freq: 329, duration: 4, start: 4 },      // E4
+        { freq: 392, duration: 4, start: 8 },      // G4
+        { freq: 523, duration: 4, start: 12 },     // C5
+        { freq: 392, duration: 4, start: 16 },     // G4
+        { freq: 329, duration: 4, start: 20 },     // E4
+        { freq: 261, duration: 4, start: 24 },     // C4
+        { freq: 196, duration: 4, start: 28 },     // G3
+        { freq: 261, duration: 4, start: 32 },     // C4
+        { freq: 349, duration: 4, start: 36 },     // F4
+        { freq: 440, duration: 4, start: 40 },     // A4
+        { freq: 523, duration: 4, start: 44 },     // C5
+        { freq: 440, duration: 4, start: 48 },     // A4
+        { freq: 349, duration: 4, start: 52 },     // F4
+        { freq: 261, duration: 4, start: 56 },     // C4
       ];
 
-      melody.forEach(note => {
-        createNote(note.freq, note.duration, note.start);
+      continuousMelody.forEach(note => {
+        createContinuousNote(note.freq, note.duration, note.start);
       });
 
-      // Loop the melody every 7.6 seconds for continuous music
-      setTimeout(() => {
-        if (gameState.isPlaying) {
-          playBackgroundMusic();
+      // Loop every 60 seconds for continuous background music
+      if (gameState.isPlaying && !gameState.isGameOver) {
+        backgroundMusicRef.current = setTimeout(() => {
+          // Double check if game is still playing before continuing
+          if (gameState.isPlaying && !gameState.isGameOver) {
+            startContinuousMusic();
+          }
+        }, 60000);
+      } else {
+        // Stop music if game is not playing or game over
+        if (backgroundMusicRef.current) {
+          clearTimeout(backgroundMusicRef.current);
+          backgroundMusicRef.current = null;
         }
-      }, 7600);
+      }
 
     } catch (error) {
-      console.log('Background music not supported');
+      console.log('Continuous music not supported');
     }
-  }, [gameState.isPlaying]);
+  }, [gameState.isPlaying, gameState.isGameOver, isMuted, volume]);
 
+  // Sound effect for scoring points
+  const playScoreSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Pleasant scoring sound
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(1200, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.1 * volume, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.log('Score sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Sound effect for game over
+  const playGameOverSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Sad descending tone
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.3);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.15 * volume, audioContext.currentTime + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (error) {
+      console.log('Game over sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Sound effect for game start
+  const playGameStartSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Upward ascending tone for game start
+      oscillator.frequency.setValueAtTime(300, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.12 * volume, audioContext.currentTime + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.2);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+    } catch (error) {
+      console.log('Game start sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Sound effect for countdown numbers
+  const playCountdownSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Short beep for countdown
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.1 * volume, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.log('Countdown sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Sound effect for collision/hit
+  const playCollisionSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Impact sound - quick burst
+      oscillator.frequency.setValueAtTime(200, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.2 * volume, audioContext.currentTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.log('Collision sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Sound effect for collecting coins
+  const playCoinSound = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Pleasant coin collection sound
+      oscillator.frequency.setValueAtTime(1000, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(1500, audioContext.currentTime + 0.15);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.15 * volume, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.01 * volume, audioContext.currentTime + 0.15);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.15);
+    } catch (error) {
+      console.log('Coin sound not supported');
+    }
+  }, [isMuted, volume]);
+
+  // Cleanup function for audio
+  const cleanupAudio = useCallback(() => {
+    if (backgroundMusicRef.current) {
+      clearTimeout(backgroundMusicRef.current);
+      backgroundMusicRef.current = null;
+    }
+    // Resume audio context if it was suspended
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+  }, []);
 
 
   const startGame = useCallback(() => {
+    // Initialize audio context on first user interaction
+    if (!audioContextRef.current) {
+      try {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        // Resume audio context if it was suspended
+        if (audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume();
+        }
+      } catch (error) {
+        console.log('Audio context not supported');
+      }
+    }
+    
     setGameState(prev => ({
       ...prev,
       isCountdown: true,
@@ -153,10 +497,17 @@ export const Game: React.FC = () => {
         { x: 1600, topHeight: 250, bottomY: 450 },
       ],
       gameSpeed: 1,
+      coins: [
+        // Randomly decide which pipes get coins (50% chance each)
+        ...(Math.random() < 0.5 ? [{ x: 1200 + PIPE_WIDTH / 2 - 5, y: 200 + PIPE_GAP / 2, collected: false }] : []),
+        ...(Math.random() < 0.5 ? [{ x: 1400 + PIPE_WIDTH / 2 - 5, y: 150 + PIPE_GAP / 2, collected: false }] : []),
+        ...(Math.random() < 0.5 ? [{ x: 1600 + PIPE_WIDTH / 2 - 5, y: 250 + PIPE_GAP / 2, collected: false }] : []),
+      ],
     }));
   }, []);
 
   const jump = useCallback(() => {
+    // Only allow jumping during gameplay, not during countdown
     if (gameState.isPlaying && !gameState.isGameOver) {
       playJumpSound();
       setGameState(prev => ({
@@ -174,9 +525,26 @@ export const Game: React.FC = () => {
       highScore: Math.max(prev.highScore, prev.score),
     }));
     
-    // Stop background music when game over
-    // Music will automatically stop when isPlaying becomes false
-  }, []);
+    // Stop all background music when game over
+    if (backgroundMusicRef.current) {
+      clearTimeout(backgroundMusicRef.current);
+      backgroundMusicRef.current = null;
+    }
+    
+    // Force stop any ongoing audio context
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      try {
+        if (audioContextRef.current.state !== 'suspended') {
+          audioContextRef.current.suspend();
+        }
+        audioContextRef.current.close();
+      } catch (error) {
+        console.log('Could not stop audio context');
+      }
+    }
+    
+    playGameOverSound();
+  }, [playGameOverSound]);
 
   const resetGame = useCallback(() => {
     setGameState(prev => ({
@@ -190,8 +558,10 @@ export const Game: React.FC = () => {
       birdY: 300,
       birdVelocity: 0,
       pipes: [],
+      coins: [],
     }));
-  }, []);
+    cleanupAudio(); // Clean up audio on reset
+  }, [cleanupAudio]);
 
   const toggleLeaderboard = useCallback(() => {
     setGameState(prev => ({
@@ -209,7 +579,27 @@ export const Game: React.FC = () => {
   }, [submitScore, gameState.score]);
 
   const updateGame = useCallback((deltaTime: number) => {
-    if (!gameState.isPlaying || gameState.isGameOver) return;
+    if (!gameState.isPlaying || gameState.isGameOver) {
+      // Stop music if game is not playing
+      if (backgroundMusicRef.current) {
+        clearTimeout(backgroundMusicRef.current);
+        backgroundMusicRef.current = null;
+      }
+      
+      // Also completely stop audio context when game is over
+      if (gameState.isGameOver && audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          if (audioContextRef.current.state !== 'suspended') {
+            audioContextRef.current.suspend();
+          }
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        } catch (error) {
+          console.log('Could not stop audio context');
+        }
+      }
+      return;
+    }
 
     setGameState(prev => {
       // Update bird physics
@@ -218,6 +608,7 @@ export const Game: React.FC = () => {
 
       // Check if bird hits ground or ceiling
       if (newBirdY <= 0 || newBirdY >= 600 - BIRD_SIZE) {
+        playCollisionSound();
         gameOver();
         return prev;
       }
@@ -270,35 +661,90 @@ export const Game: React.FC = () => {
       });
 
       if (collision) {
+        playCollisionSound();
         gameOver();
         return prev;
       }
 
-      // Update score
+      // Update coins and score
       let newScore = prev.score;
-      newPipes.forEach(pipe => {
-        if (pipe.x + PIPE_WIDTH < 100 && pipe.x + PIPE_WIDTH >= 100 - PIPE_SPEED) {
-          newScore += 1;
+      const newCoins = prev.coins.map(coin => {
+        // Check if bird collected the coin
+        const birdRect = {
+          x: 100 + 8,
+          y: newBirdY + 8,
+          width: BIRD_SIZE - 16,
+          height: BIRD_SIZE - 16,
+        };
+        
+        if (!coin.collected && 
+            birdRect.x < coin.x + 30 && 
+            birdRect.x + birdRect.width > coin.x &&
+            birdRect.y < coin.y + 30 && 
+            birdRect.y + birdRect.height > coin.y) {
+          // Coin collected!
+          newScore += 10;
+          playCoinSound();
+          return { ...coin, collected: true };
         }
-      });
+        return coin;
+      }).filter(coin => coin.x > -50); // Remove coins that are off screen
+
+      // Move coins with the game
+      const updatedCoins = newCoins.map(coin => ({
+        ...coin,
+        x: coin.x - PIPE_SPEED * prev.gameSpeed,
+      }));
+
+      // Add new coins when needed
+      if (updatedCoins.length === 0 || updatedCoins[updatedCoins.length - 1].x < 800) {
+        const lastCoinX = updatedCoins.length > 0 ? updatedCoins[updatedCoins.length - 1].x : 1200;
+        
+        // Randomly decide if we should add a coin (50% chance for variety)
+        if (Math.random() < 0.5) {
+                      // Find the nearest pipe to place coin in its gap
+            const nearestPipe = newPipes.find(pipe => pipe.x > lastCoinX + 200);
+            if (nearestPipe) {
+              // Calculate the center of the pipe gap (between top and bottom pipes)
+              const gapCenter = nearestPipe.topHeight + PIPE_GAP / 2;
+              // Add some random variation around the center (smaller range for better positioning)
+              const coinY = gapCenter + (Math.random() - 0.5) * 20;
+              
+              // Ensure coin is within safe bounds
+              const safeY = Math.max(120, Math.min(480, coinY));
+              
+              updatedCoins.push({
+                x: nearestPipe.x + PIPE_WIDTH / 2 - 5, // 10 pixels to the right from previous position
+                y: safeY,
+                collected: false,
+              });
+            }
+        }
+      }
 
       // Increase game speed
-      const newGameSpeed = Math.min(2, 1 + newScore / 50);
+      const newGameSpeed = Math.min(2, 1 + newScore / 100);
 
       return {
         ...prev,
         birdY: newBirdY,
         birdVelocity: newBirdVelocity,
         pipes: newPipes,
+        coins: updatedCoins,
         score: newScore,
         gameSpeed: newGameSpeed,
       };
     });
-  }, [gameState.isPlaying, gameState.isGameOver, gameOver]);
+  }, [gameState.isPlaying, gameState.isGameOver, gameOver, playCoinSound, playCollisionSound]);
 
   // Countdown effect
   useEffect(() => {
     if (gameState.isCountdown && gameState.countdown > 0) {
+      // Play countdown sound for each number
+      if (gameState.countdown <= 3) {
+        playCountdownSound();
+      }
+      
       const timer = setTimeout(() => {
         setGameState(prev => ({
           ...prev,
@@ -316,8 +762,31 @@ export const Game: React.FC = () => {
       
       // Start background music when game starts
       playBackgroundMusic();
+      // Start continuous background music
+      startContinuousMusic();
+      // Play game start sound
+      playGameStartSound();
+      
+      // Ensure audio context is running
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
     }
-  }, [gameState.isCountdown, gameState.countdown]);
+  }, [gameState.isCountdown, gameState.countdown, playBackgroundMusic, startContinuousMusic, playGameStartSound, playCountdownSound]);
+
+  // Start music when countdown begins
+  useEffect(() => {
+    if (gameState.isCountdown && gameState.countdown === 3) {
+      // Start background music when countdown begins
+      playBackgroundMusic();
+      startContinuousMusic();
+      
+      // Ensure audio context is running
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    }
+  }, [gameState.isCountdown, gameState.countdown, playBackgroundMusic, startContinuousMusic]);
 
   useEffect(() => {
     const gameLoop = (currentTime: number) => {
@@ -339,8 +808,33 @@ export const Game: React.FC = () => {
       if (gameLoopRef.current) {
         cancelAnimationFrame(gameLoopRef.current);
       }
+      cleanupAudio(); // Clean up audio on component unmount
     };
-  }, [gameState.isPlaying, updateGame]);
+  }, [gameState.isPlaying, updateGame, cleanupAudio]);
+
+  // Stop music when game over
+  useEffect(() => {
+    if (gameState.isGameOver) {
+      // Stop all background music
+      if (backgroundMusicRef.current) {
+        clearTimeout(backgroundMusicRef.current);
+        backgroundMusicRef.current = null;
+      }
+      
+      // Completely stop audio context
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          if (audioContextRef.current.state !== 'suspended') {
+            audioContextRef.current.suspend();
+          }
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        } catch (error) {
+          console.log('Could not stop audio context');
+        }
+      }
+    }
+  }, [gameState.isGameOver]);
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -356,6 +850,35 @@ export const Game: React.FC = () => {
 
   return (
     <div className="relative w-full h-[600px] bg-gradient-to-b from-amber-200 via-orange-300 to-amber-800 overflow-hidden">
+      <style jsx>{`
+        input[type="range"]::-webkit-slider-thumb {
+          appearance: none;
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          border: none;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-ms-thumb {
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+        }
+      `}</style>
       {/* Background elements */}
       <div className="absolute inset-0">
         <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-white/20 to-transparent"></div>
@@ -374,6 +897,33 @@ export const Game: React.FC = () => {
           {gameState.pipes.map((pipe, index) => (
             <Pipe key={index} {...pipe} />
           ))}
+          
+          {/* Render coins */}
+          {gameState.coins.map((coin, index) => (
+            !coin.collected && (
+              <div
+                key={`coin-${index}`}
+                className="absolute w-12 h-12 text-4xl drop-shadow-lg pointer-events-none"
+                style={{
+                  left: coin.x,
+                  top: coin.y,
+                  transform: 'translate(-50%, -50%)',
+                  filter: 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.6))',
+                  zIndex: 10,
+                }}
+              >
+                🪙
+                {/* Glowing effect */}
+                <div 
+                  className="absolute inset-0 w-12 h-12 rounded-full animate-pulse"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(255, 215, 0, 0.3) 0%, transparent 70%)',
+                    zIndex: -1,
+                  }}
+                />
+              </div>
+            )
+          ))}
         </>
       )}
 
@@ -385,6 +935,8 @@ export const Game: React.FC = () => {
           </div>
         </div>
       )}
+
+
 
       {/* Countdown screen */}
       {gameState.isCountdown && (
@@ -432,6 +984,32 @@ export const Game: React.FC = () => {
               >
                 🏆 Leaderboard
               </button>
+            </div>
+            
+            {/* Sound control button on start screen */}
+            <div className="mt-6 space-y-3">
+              <button
+                onClick={() => setIsMuted(!isMuted)}
+                className="bg-black/30 text-white p-3 rounded-full hover:bg-black/50 transition-all duration-200"
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted ? "🔇 Sound Off" : "🔊 Sound On"}
+              </button>
+              
+              {/* Volume control on start screen */}
+              <div className="flex items-center space-x-3">
+                <span className="text-white/80 text-sm">Volume:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="w-24 h-2 bg-white/30 rounded-lg appearance-none cursor-pointer"
+                  title="Volume"
+                />
+              </div>
             </div>
           </div>
         </div>
